@@ -19,6 +19,8 @@ body{background:var(--bg);color:var(--tx);font-family:'Rajdhani',sans-serif;over
 .panel h2{font-family:'Cinzel',serif;font-size:.72rem;letter-spacing:.15em;color:var(--mt);margin-bottom:10px;text-transform:uppercase}
 input[type=text]{width:100%;background:var(--bg);border:1px solid var(--bd);border-radius:7px;color:var(--tx);font-family:'Rajdhani',sans-serif;font-size:1rem;padding:10px 13px;outline:none;transition:border-color .2s}
 input[type=text]:focus{border-color:var(--gold)}input::placeholder{color:var(--mt)}
+.auth-input{width:100%;background:var(--bg);border:1px solid var(--bd);border-radius:7px;color:var(--tx);font-family:'Rajdhani',sans-serif;font-size:1rem;padding:10px 13px;outline:none;transition:border-color .2s;display:block}
+.auth-input:focus{border-color:var(--gold)}
 .btn{display:block;width:100%;padding:11px;border-radius:7px;border:none;cursor:pointer;font-family:'Cinzel',serif;font-size:.72rem;letter-spacing:.1em;font-weight:700;text-transform:uppercase;transition:all .15s}
 .btn-gold{background:var(--gold);color:#0d0a1a}.btn-gold:hover{background:var(--gold2);transform:translateY(-1px)}
 .btn-out{background:transparent;color:var(--tx);border:1px solid var(--bd)}.btn-out:hover{border-color:var(--gold);color:var(--gold)}
@@ -148,9 +150,129 @@ input[type=text]:focus{border-color:var(--gold)}input::placeholder{color:var(--m
 .lan-btn{width:24px;height:24px;border-radius:6px;border:none;cursor:pointer;font-size:15px;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .12s;font-weight:700;line-height:1}
 .lan-btn-add{background:var(--grn);color:#fff}.lan-btn-add:hover{filter:brightness(1.15);transform:scale(1.08)}
 .lan-btn-rem{background:rgba(42,32,80,.8);color:var(--mt);border:1px solid var(--bd)}.lan-btn-rem:hover{border-color:var(--red);color:var(--red)}
+/* Firebase UI */
+#auth-modal { position:fixed; top:0; left:0; width:100%; height:100vh; background:rgba(0,0,0,0.85); z-index:1000; display:none; align-items:center; justify-content:center; flex-direction:column; }
+#auth-modal.on { display:flex !important; }
+#leaderboard-screen { position:fixed; inset:0; background:var(--bg); z-index:500; display:none; flex-direction:column; padding:20px; }
+#leaderboard-screen.on { display:flex; }
+.lb-table { width:100%; border-collapse:collapse; margin-top:20px; }
+.lb-table th { text-align:left; color:var(--mt); font-family:'Cinzel',serif; font-size:0.7rem; text-transform:uppercase; padding:10px; border-bottom:1px solid var(--bd); }
+.lb-table td { padding:12px 10px; border-bottom:1px solid rgba(42,32,80,0.5); font-size:0.9rem; }
+.lb-rank { color:var(--gold); font-weight:700; width:40px; }
+.profile-bar { position:fixed; top:18px; right:18px; z-index:100; display:flex; align-items:center; gap:10px; }
+.profile-btn { background:var(--sf); border:1px solid var(--bd); border-radius:30px; padding:6px 14px; color:var(--tx); font-family:'Cinzel',serif; font-size:0.65rem; cursor:pointer; display:flex; align-items:center; gap:8px; transition:all 0.2s; }
+.profile-btn:hover { border-color:var(--gold); }
+.auth-panel { width:340px; }
 </style>
+
+<!-- Firebase SDKs -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+  import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, updateProfile } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+  import { getFirestore, doc, setDoc, getDoc, updateDoc, increment, collection, query, orderBy, limit, getDocs } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyB1bTqRiz3MNEBDJ9mIUyv4xOeaBr-8Euc",
+    authDomain: "archer-tourney.firebaseapp.com",
+    projectId: "archer-tourney",
+    storageBucket: "archer-tourney.firebasestorage.app",
+    messagingSenderId: "81076246564",
+    appId: "1:81076246564:web:cd6eb598590d28fba320b1",
+    measurementId: "G-V4JV3PL5VG"
+  };
+
+  try {
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
+    window.fb = { 
+      auth, db, 
+      signIn: signInWithEmailAndPassword, 
+      signUp: createUserWithEmailAndPassword,
+      signOut,
+      updateProfile,
+      doc, setDoc, getDoc, updateDoc, increment, collection, query, orderBy, limit, getDocs
+    };
+    window.fbReady = true;
+    initFirebaseListeners();
+    console.log("Firebase initialized successfully");
+  } catch (e) {
+    console.error("Firebase initialization failed:", e);
+    window.fbReady = false;
+  }
+</script>
 </head>
 <body>
+
+<div class="profile-bar">
+  <button id="lb-open-btn" class="profile-btn" onclick="openLeaderboard()">🏆 Leaderboard</button>
+  <button id="auth-trigger" class="profile-btn" onclick="openAuth()">👤 <span id="auth-label">Login</span></button>
+</div>
+
+<div id="auth-modal">
+  <div class="panel auth-panel">
+    <div id="auth-view-login">
+      <h2>Login</h2>
+      <input type="text" id="auth-email" placeholder="Email" class="auth-input" />
+      <div class="g8"></div>
+      <input type="password" id="auth-pass" placeholder="Password" class="auth-input" />
+      <div class="g12"></div>
+      <button class="btn btn-gold" onclick="doAuth('login')">Sign In</button>
+      <div class="g8"></div>
+      <div style="text-align:center; font-size:0.7rem; color:var(--mt)">Don't have an account? <a href="#" onclick="toggleAuthMode(false)" style="color:var(--gold)">Sign Up</a></div>
+    </div>
+    <div id="auth-view-signup" style="display:none">
+      <h2>Create Profile</h2>
+      <input type="text" id="reg-name" placeholder="Display Name" class="auth-input" />
+      <div class="g8"></div>
+      <input type="text" id="reg-email" placeholder="Email" class="auth-input" />
+      <div class="g8"></div>
+      <input type="password" id="reg-pass" placeholder="Password" class="auth-input" />
+      <div class="g12"></div>
+      <button class="btn btn-gold" onclick="doAuth('signup')">Create Account</button>
+      <div class="g8"></div>
+      <div style="text-align:center; font-size:0.7rem; color:var(--mt)">Already have an account? <a href="#" onclick="toggleAuthMode(true)" style="color:var(--gold)">Login</a></div>
+    </div>
+    <div id="auth-view-profile" style="display:none">
+      <h2>Your Profile</h2>
+      <div id="prof-name" style="font-size:1.2rem; font-weight:700; color:var(--gold)">—</div>
+      <div id="prof-email" style="font-size:0.8rem; color:var(--mt); margin-bottom:15px">—</div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px">
+        <div class="code-box" style="padding:10px"><div class="cl">Wins</div><div class="cv" id="stat-wins" style="font-size:1.4rem">0</div></div>
+        <div class="code-box" style="padding:10px"><div class="cl">Kills</div><div class="cv" id="stat-kills" style="font-size:1.4rem">0</div></div>
+      </div>
+      <div class="g12"></div>
+      <button class="btn btn-out" onclick="window.fb.signOut(window.fb.auth)">Sign Out</button>
+    </div>
+    <div class="err" id="auth-err"></div>
+    <div class="g8"></div>
+    <button class="btn btn-out" onclick="closeAuth()">Close</button>
+  </div>
+</div>
+
+<div id="leaderboard-screen">
+  <div style="display:flex; justify-content:space-between; align-items:center">
+    <div class="logo" style="font-size:1.5rem">🏹 GLOBAL<span> LEADERBOARD</span></div>
+    <button class="btn btn-out" style="width:auto; padding:8px 20px" onclick="closeLeaderboard()">Back</button>
+  </div>
+  <div class="panel" style="width:100%; flex:1; overflow-y:auto; margin-top:20px; max-width:800px; align-self:center">
+    <table class="lb-table">
+      <thead>
+        <tr>
+          <th>Rank</th>
+          <th>Archer</th>
+          <th>Wins</th>
+          <th>Kills</th>
+          <th>Accuracy</th>
+        </tr>
+      </thead>
+      <tbody id="lb-body">
+        <!-- Rows will be injected here -->
+      </tbody>
+    </table>
+  </div>
+</div>
 
 <div id="home-screen" class="screen active">
   <div class="logo">🏹 ARCHER<span> TOURNEY</span></div>
@@ -349,6 +471,134 @@ input[type=text]:focus{border-color:var(--gold)}input::placeholder{color:var(--m
 <button id="theme-btn" onclick="toggleTheme()" style="position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:600;background:rgba(5,3,15,.82);border:1px solid rgba(212,160,23,.3);border-radius:20px;padding:5px 16px;font-family:'Cinzel',serif;font-size:.6rem;letter-spacing:.1em;color:#9a8a70;cursor:pointer;backdrop-filter:blur(8px);display:none">☀️ Day Mode</button>
 
 <script>
+// ═══════════════════════════════════════════════════════════════════════════════
+// FIREBASE & PROFILE LOGIC
+// ═══════════════════════════════════════════════════════════════════════════════
+let currentUser = null;
+let userStats = { wins: 0, kills: 0, accuracy: 0, arrowsFired: 0, arrowsHit: 0 };
+
+function openAuth() {
+  document.getElementById('auth-modal').classList.add('on');
+  if (currentUser) {
+    showAuthView('profile');
+    document.getElementById('prof-name').innerText = currentUser.displayName || 'Archer';
+    document.getElementById('prof-email').innerText = currentUser.email;
+    document.getElementById('stat-wins').innerText = userStats.wins;
+    document.getElementById('stat-kills').innerText = userStats.kills;
+  } else {
+    showAuthView('login');
+  }
+}
+
+function closeAuth() { document.getElementById('auth-modal').classList.remove('on'); }
+
+function showAuthView(view) {
+  document.getElementById('auth-view-login').style.display = view === 'login' ? 'block' : 'none';
+  document.getElementById('auth-view-signup').style.display = view === 'signup' ? 'block' : 'none';
+  document.getElementById('auth-view-profile').style.display = view === 'profile' ? 'block' : 'none';
+  document.getElementById('auth-err').innerText = '';
+}
+
+function toggleAuthMode(isLogin) { showAuthView(isLogin ? 'login' : 'signup'); }
+
+async function doAuth(mode) {
+  const err = document.getElementById('auth-err');
+  err.innerText = '';
+  try {
+    if (mode === 'login') {
+      const email = document.getElementById('auth-email').value;
+      const pass = document.getElementById('auth-pass').value;
+      await window.fb.signIn(window.fb.auth, email, pass);
+    } else {
+      const name = document.getElementById('reg-name').value;
+      const email = document.getElementById('reg-email').value;
+      const pass = document.getElementById('reg-pass').value;
+      if (!name) throw new Error("Name is required");
+      const res = await window.fb.signUp(window.fb.auth, email, pass);
+      await window.fb.updateProfile(res.user, { displayName: name });
+      await window.fb.setDoc(window.fb.doc(window.fb.db, "users", res.user.uid), {
+        name: name,
+        wins: 0, kills: 0, arrowsFired: 0, arrowsHit: 0,
+        lastPlayed: Date.now()
+      });
+    }
+    closeAuth();
+  } catch (e) {
+    if (e && (e.code === 'auth/operation-not-allowed' || e.code === 'auth/admin-restricted-operation')) {
+      err.innerText = 'Email/password sign-in is disabled in Firebase. Enable Authentication > Sign-in method > Email/Password.';
+    } else {
+      err.innerText = e && e.message ? e.message : 'Authentication failed.';
+    }
+  }
+}
+
+async function openLeaderboard() {
+  document.getElementById('leaderboard-screen').classList.add('on');
+  const body = document.getElementById('lb-body');
+  body.innerHTML = '<tr><td colspan="5" style="text-align:center">Loading...</td></tr>';
+  try {
+    const q = window.fb.query(window.fb.collection(window.fb.db, "users"), window.fb.orderBy("wins", "desc"), window.fb.limit(20));
+    const snap = await window.fb.getDocs(q);
+    body.innerHTML = '';
+    let rank = 1;
+    snap.forEach(doc => {
+      const data = doc.data();
+      const acc = data.arrowsFired > 0 ? Math.round((data.arrowsHit / data.arrowsFired) * 100) : 0;
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td class="lb-rank">#${rank++}</td>
+        <td>${data.name}</td>
+        <td>${data.wins || 0}</td>
+        <td>${data.kills || 0}</td>
+        <td>${acc}%</td>
+      `;
+      body.appendChild(tr);
+    });
+  } catch (e) {
+    body.innerHTML = `<tr><td colspan="5" style="text-align:center; color:var(--red)">${e.message}</td></tr>`;
+  }
+}
+
+function closeLeaderboard() { document.getElementById('leaderboard-screen').classList.remove('on'); }
+
+async function pushStats(matchStats, isWinner) {
+  if (!currentUser || !window.fb) return;
+  try {
+    const userRef = window.fb.doc(window.fb.db, "users", currentUser.uid);
+    await window.fb.updateDoc(userRef, {
+      wins: window.fb.increment(isWinner ? 1 : 0),
+      kills: window.fb.increment(matchStats.arrowsHit || 0),
+      arrowsFired: window.fb.increment(matchStats.arrowsFired || 0),
+      arrowsHit: window.fb.increment(matchStats.arrowsHit || 0),
+      lastPlayed: Date.now()
+    });
+    const docSnap = await window.fb.getDoc(userRef);
+    if (docSnap.exists()) userStats = docSnap.data();
+  } catch (e) { console.warn("Failed to push stats", e); }
+}
+
+function initFirebaseListeners() {
+  if (!window.fbReady || !window.fb) return;
+  
+  window.fb.auth.onAuthStateChanged(async (user) => {
+    currentUser = user;
+    const label = document.getElementById('auth-label');
+    if (user) {
+      label.innerText = user.displayName || 'Profile';
+      document.getElementById('inp-name').value = user.displayName || '';
+      try {
+        const docSnap = await window.fb.getDoc(window.fb.doc(window.fb.db, "users", user.uid));
+        if (docSnap.exists()) userStats = docSnap.data();
+      } catch (e) {
+        console.warn("Failed to load user stats", e);
+      }
+    } else {
+      label.innerText = 'Login';
+      userStats = { wins: 0, kills: 0, accuracy: 0, arrowsFired: 0, arrowsHit: 0 };
+    }
+  });
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // CANVAS SETUP
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -2165,6 +2415,9 @@ socket.on('duelEnd',({matchId,winnerId,reason,stats})=>{
   const statsEl=document.getElementById('duel-stats');
   statsEl.innerHTML='';
   if(stats){
+    // Update Firebase stats if logged in
+    if (stats[myId]) pushStats(stats[myId], false);
+
     Object.values(stats).forEach(s=>{
       const card=document.createElement('div');
       card.className='stats-card';
@@ -2195,7 +2448,11 @@ socket.on('tournamentFinished',({winnerId,winnerName,winnerColor,awards})=>{
   cancelAnimationFrame(animId); animId=null;
   document.getElementById('tw-name').textContent=winnerName+(winnerId===myId?' — That\'s You! 🎉':'');
   document.getElementById('tw-name').style.color=winnerColor||'#f0e8d0';
-  if(winnerId===myId) SFX.victory();
+  if(winnerId===myId) {
+    SFX.victory();
+    // Update Firebase win if logged in
+    pushStats({}, true);
+  }
   // Awards
   const awardsEl=document.getElementById('awards-list');
   awardsEl.innerHTML='';
