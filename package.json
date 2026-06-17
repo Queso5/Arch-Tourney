@@ -3,6 +3,13 @@
   "version": "1.0.0",
   "description": "Ragdoll Archery Tournament",
   "main": "server.js",
-  "scripts": { "start": "node server.js" },
-  "dependencies": { "express": "^5.2.1", "socket.io": "^4.8.3" }
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@google/genai": "^2.8.0",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "socket.io": "^4.8.3"
+  }
 }

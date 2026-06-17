@@ -285,8 +285,21 @@ input[type=text]:focus{border-color:var(--gold)}input::placeholder{color:var(--m
     <div class="fl">Arrow color</div>
     <div class="crow" id="cpick"></div>
     <div class="g8"></div>
-    <div class="fl">Hat</div>
-    <div class="crow" id="hpick"></div>
+    <div class="fl">Avatar</div>
+    <!-- AI Generation -->
+    <div style="display:flex;gap:6px;margin-bottom:6px">
+      <input type="text" id="ai-prompt" placeholder="e.g. Dark samurai with red eyes" style="flex:1;font-size:.82rem" maxlength="120"/>
+      <button onclick="generateAIAvatar()" id="ai-gen-btn" class="btn btn-gold" style="width:auto;padding:8px 12px;font-size:.6rem;white-space:nowrap">✨ Generate</button>
+    </div>
+    <div id="ai-gen-status" style="font-size:.7rem;color:var(--mt);min-height:1.2em;margin-bottom:4px"></div>
+    <!-- Manual Upload -->
+    <label for="avatar-upload" style="display:block;width:100%;padding:8px;border-radius:7px;border:1px solid var(--bd);background:transparent;color:var(--mt);font-family:'Cinzel',serif;font-size:.6rem;letter-spacing:.08em;text-align:center;cursor:pointer;transition:all .15s" onmouseover="this.style.borderColor='var(--gold)';this.style.color='var(--gold)'" onmouseout="this.style.borderColor='var(--bd)';this.style.color='var(--mt)'">📁 Upload Image</label>
+    <input type="file" id="avatar-upload" accept="image/*" style="display:none"/>
+    <div id="avatar-err" class="err"></div>
+    <div id="avatar-preview-wrap" style="margin-top:8px;text-align:center;display:none">
+      <img id="avatar-preview" style="width:72px;height:72px;border-radius:50%;object-fit:cover;display:block;margin:0 auto;border:2px solid var(--gold);"/>
+      <button id="avatar-remove-btn" onclick="removeAvatar()" style="margin-top:6px;background:transparent;border:1px solid var(--bd);border-radius:5px;color:var(--mt);font-family:'Cinzel',serif;font-size:.58rem;letter-spacing:.08em;padding:3px 10px;cursor:pointer;transition:all .15s" onmouseover="this.style.borderColor='var(--red)';this.style.color='var(--red)'" onmouseout="this.style.borderColor='var(--bd)';this.style.color='var(--mt)'">✕ Remove</button>
+    </div>
     <div class="g12"></div>
     <button class="btn btn-gold" onclick="doCreate()">Create Room</button>
     <div class="g8"></div>
@@ -333,11 +346,7 @@ input[type=text]:focus{border-color:var(--gold)}input::placeholder{color:var(--m
         </div>
       </div>
     </div>
-    <div class="g8"></div>
-    <div id="lobby-hat-section">
-      <div style="font-family:'Cinzel',serif;font-size:.7rem;color:var(--tx);font-weight:600;margin-bottom:6px">Your Hat</div>
-      <div class="crow" id="lobby-hpick"></div>
-    </div>
+
     <h2>Players (<span id="p-count">0</span>/8) — need at least 2</h2>
     <ul class="plist" id="p-list"></ul>
     <div class="g12"></div>
@@ -633,41 +642,178 @@ let myColor=COLORS[0];
 })();
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// HAT PICKER
+// AVATAR SYSTEM
 // ═══════════════════════════════════════════════════════════════════════════════
-const HATS={
-  none:   {emoji:'—',  label:'None'},
-  crown:  {emoji:'👑', label:'Crown'},
-  viking: {emoji:'🪖', label:'Viking'}, // fallback emoji; rendered custom on canvas
-  tophat: {emoji:'🎩', label:'Top Hat'},
-  bandana:{emoji:'🧣', label:'Bandana'},
-  halo:   {emoji:'😇', label:'Halo'},
-  cap:    {emoji:'🧢', label:'Cap'},
-};
-let myHat='none';
-function buildHatPicker(elId, onSelect){
-  const el=document.getElementById(elId);
-  if(!el) return;
-  el.innerHTML='';
-  Object.entries(HATS).forEach(([key,info],i)=>{
-    const sw=document.createElement('div');
-    sw.className='hsw'+(key===myHat?' sel':'');
-    sw.title=info.label;
-    sw.textContent=info.emoji;
-    sw.dataset.hat=key;
-    sw.onclick=()=>{
-      myHat=key;
-      document.querySelectorAll('#'+elId+' .hsw').forEach(s=>s.classList.remove('sel'));
-      sw.classList.add('sel');
-      if(onSelect) onSelect(key);
+let myAvatar=null;
+let myAvatarImg=null;
+let avatarCache={};
+
+function compressAvatar(file, cb){
+  const errEl = document.getElementById('avatar-err');
+  errEl.textContent = '';
+  if(!file.type.startsWith('image/')){
+    errEl.textContent = 'Please select a valid image file.';
+    return;
+  }
+  if(file.size > 5 * 1024 * 1024){
+    errEl.textContent = 'Image too large (max 5MB).';
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = () => {
+    const tempImg = new Image();
+    tempImg.onload = () => {
+      const SIZE = 128;
+      const cvs = document.createElement('canvas');
+      cvs.width = SIZE; cvs.height = SIZE;
+      const tCtx = cvs.getContext('2d');
+      const sz = Math.min(tempImg.width, tempImg.height);
+      const sx = (tempImg.width - sz) / 2;
+      const sy = (tempImg.height - sz) / 2;
+      tCtx.drawImage(tempImg, sx, sy, sz, sz, 0, 0, SIZE, SIZE);
+      // Try WebP first (best compression), fallback to JPEG
+      const fmt = cvs.toDataURL('image/webp', 0.001).startsWith('data:image/webp') ? 'image/webp' : 'image/jpeg';
+      const dataUrl = cvs.toDataURL(fmt, 0.75);
+      cb(dataUrl);
     };
-    el.appendChild(sw);
-  });
+    tempImg.src = reader.result;
+  };
+  reader.readAsDataURL(file);
 }
-buildHatPicker('hpick', (hat)=>{
-  // Keep lobby picker in sync if it exists
-  document.querySelectorAll('#lobby-hpick .hsw').forEach(s=>s.classList.toggle('sel',s.dataset.hat===hat));
+
+function applyAvatar(dataUrl){
+  myAvatar = dataUrl;
+  myAvatarImg = new Image();
+  myAvatarImg.src = dataUrl;
+  localStorage.setItem('archerAvatar', dataUrl);
+  const preview = document.getElementById('avatar-preview');
+  const wrap = document.getElementById('avatar-preview-wrap');
+  preview.src = dataUrl;
+  wrap.style.display = 'block';
+  if(myId) socket.emit('setAvatar', {avatar: dataUrl});
+  if(myId) avatarCache[myId] = myAvatarImg;
+}
+
+function removeAvatar(){
+  myAvatar = null;
+  myAvatarImg = null;
+  if(myId) delete avatarCache[myId];
+  localStorage.removeItem('archerAvatar');
+  document.getElementById('avatar-preview-wrap').style.display = 'none';
+  document.getElementById('avatar-preview').src = '';
+  document.getElementById('avatar-upload').value = '';
+  if(myId) socket.emit('setAvatar', {avatar: null});
+}
+
+async function generateAIAvatar(){
+  const promptEl = document.getElementById('ai-prompt');
+  const statusEl = document.getElementById('ai-gen-status');
+  const btn = document.getElementById('ai-gen-btn');
+  const errEl = document.getElementById('avatar-err');
+
+  const prompt = promptEl?.value?.trim();
+  errEl.textContent = '';
+  if(!prompt){
+    errEl.textContent = 'Enter a prompt first.';
+    return;
+  }
+
+  // Loading state
+  btn.disabled = true;
+  btn.textContent = '⏳ Generating...';
+  statusEl.textContent = 'Generating your avatar with AI…';
+  statusEl.style.color = 'var(--gold)';
+
+  try {
+    const res = await fetch('/generate-avatar', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({prompt}),
+      signal: AbortSignal.timeout(60000),
+    });
+
+    const json = await res.json();
+
+    if(!res.ok || json.error){
+      errEl.textContent = json.error || 'Generation failed.';
+      statusEl.textContent = '';
+      return;
+    }
+
+    // Build a data URL from the returned base64
+    const rawDataUrl = `data:${json.mimeType};base64,${json.data}`;
+
+    // Run through compressAvatar pipeline (resize to 128x128, JPEG/WebP)
+    const tempImg = new Image();
+    tempImg.onload = () => {
+      const SIZE = 128;
+      const cvs = document.createElement('canvas');
+      cvs.width = SIZE; cvs.height = SIZE;
+      const tCtx = cvs.getContext('2d');
+      const sz = Math.min(tempImg.width, tempImg.height);
+      const sx = (tempImg.width - sz) / 2;
+      const sy = (tempImg.height - sz) / 2;
+      tCtx.drawImage(tempImg, sx, sy, sz, sz, 0, 0, SIZE, SIZE);
+      const fmt = cvs.toDataURL('image/webp',0.001).startsWith('data:image/webp') ? 'image/webp' : 'image/jpeg';
+      applyAvatar(cvs.toDataURL(fmt, 0.80));
+      statusEl.textContent = '✓ Avatar generated!';
+      statusEl.style.color = 'var(--grn)';
+      setTimeout(()=>{ statusEl.textContent=''; }, 3000);
+    };
+    tempImg.onerror = () => {
+      errEl.textContent = 'Failed to decode generated image.';
+      statusEl.textContent = '';
+    };
+    tempImg.src = rawDataUrl;
+
+  } catch(err){
+    if(err.name === 'TimeoutError' || err.name === 'AbortError'){
+      errEl.textContent = 'Request timed out. Try again.';
+    } else {
+      errEl.textContent = err.message || 'Network error.';
+    }
+    statusEl.textContent = '';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '✨ Generate';
+  }
+}
+
+const avatarInput = document.getElementById('avatar-upload');
+avatarInput?.addEventListener('change', e => {
+  const file = e.target.files[0];
+  if(!file) return;
+  compressAvatar(file, applyAvatar);
 });
+
+const savedAvatar = localStorage.getItem('archerAvatar');
+if(savedAvatar){
+  if(savedAvatar.length > 60000){
+    localStorage.removeItem('archerAvatar');
+  } else {
+    myAvatar = savedAvatar;
+    myAvatarImg = new Image();
+    myAvatarImg.src = savedAvatar;
+    const preview = document.getElementById('avatar-preview');
+    const wrap = document.getElementById('avatar-preview-wrap');
+    if(preview && wrap){
+      preview.src = savedAvatar;
+      wrap.style.display = 'block';
+    }
+  }
+}
+
+function drawAvatarHead(img,x,y,radius){
+  if(!img || !img.complete) return false;
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(x,y,radius,0,Math.PI*2);
+  ctx.closePath();
+  ctx.clip();
+  ctx.drawImage(img,x-radius,y-radius,radius*2,radius*2);
+  ctx.restore();
+  return true;
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // GAME STATE
@@ -1085,93 +1231,7 @@ function drawArcher(a, isMe){
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// COSMETIC HATS — drawn in archer-local coordinates (head centered ~(f*1, -46))
-// ═══════════════════════════════════════════════════════════════════════════════
-function drawHat(hat,f,color){
-  const hx=f*1*sx, hy=-46*sy; // head center
-  ctx.save();
-  switch(hat){
-    case 'crown':{
-      ctx.fillStyle='#ffd700';
-      ctx.strokeStyle='#b8860b'; ctx.lineWidth=1*sx;
-      ctx.beginPath();
-      ctx.moveTo(hx-10*sx,hy-9*sy);
-      ctx.lineTo(hx-10*sx,hy-16*sy);
-      ctx.lineTo(hx-5*sx,hy-11*sy);
-      ctx.lineTo(hx,hy-18*sy);
-      ctx.lineTo(hx+5*sx,hy-11*sy);
-      ctx.lineTo(hx+10*sx,hy-16*sy);
-      ctx.lineTo(hx+10*sx,hy-9*sy);
-      ctx.closePath();
-      ctx.fill(); ctx.stroke();
-      // Gems
-      ctx.fillStyle='#ff3b3b';
-      ctx.beginPath(); ctx.arc(hx,hy-14*sy,1.6*sx,0,Math.PI*2); ctx.fill();
-      ctx.fillStyle='#3bb5ff';
-      ctx.beginPath(); ctx.arc(hx-6*sx,hy-11*sy,1.3*sx,0,Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.arc(hx+6*sx,hy-11*sy,1.3*sx,0,Math.PI*2); ctx.fill();
-      break;
-    }
-    case 'viking':{
-      // Helmet dome
-      ctx.fillStyle='#9a9a9a';
-      ctx.beginPath(); ctx.arc(hx,hy-12*sy,9*sx,Math.PI,0); ctx.fill();
-      ctx.fillStyle='#7a7a7a';
-      ctx.fillRect(hx-9*sx,hy-13*sy,18*sx,3*sy);
-      // Horns
-      ctx.strokeStyle='#f0e0c0'; ctx.lineWidth=2.5*sx; ctx.lineCap='round';
-      ctx.beginPath(); ctx.moveTo(hx-8*sx,hy-12*sy); ctx.quadraticCurveTo(hx-15*sx,hy-18*sy,hx-13*sx,hy-22*sy); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(hx+8*sx,hy-12*sy); ctx.quadraticCurveTo(hx+15*sx,hy-18*sy,hx+13*sx,hy-22*sy); ctx.stroke();
-      break;
-    }
-    case 'tophat':{
-      ctx.fillStyle='#1a1a1a';
-      ctx.fillRect(hx-9*sx,hy-26*sy,18*sx,16*sy);
-      ctx.fillRect(hx-12*sx,hy-11*sy,24*sx,3*sy);
-      ctx.fillStyle='#8b0000';
-      ctx.fillRect(hx-9*sx,hy-15*sy,18*sx,3*sy);
-      break;
-    }
-    case 'bandana':{
-      ctx.fillStyle=color;
-      ctx.beginPath();
-      ctx.moveTo(hx-11*sx,hy-9*sy);
-      ctx.quadraticCurveTo(hx,hy-19*sy,hx+11*sx,hy-9*sy);
-      ctx.quadraticCurveTo(hx,hy-13*sy,hx-11*sx,hy-9*sy);
-      ctx.fill();
-      // Knot tails at back
-      ctx.fillStyle=color;
-      ctx.beginPath(); ctx.moveTo(hx-f*9*sx,hy-8*sy); ctx.lineTo(hx-f*16*sx,hy-4*sy); ctx.lineTo(hx-f*15*sx,hy-9*sy); ctx.fill();
-      ctx.beginPath(); ctx.moveTo(hx-f*9*sx,hy-5*sy); ctx.lineTo(hx-f*15*sx,hy-1*sy); ctx.lineTo(hx-f*13*sx,hy-6*sy); ctx.fill();
-      // Pattern dots
-      ctx.fillStyle='rgba(255,255,255,.6)';
-      [-6,-2,2,6].forEach(dx=>{ ctx.beginPath(); ctx.arc(hx+dx*sx,hy-11*sy,1*sx,0,Math.PI*2); ctx.fill(); });
-      break;
-    }
-    case 'halo':{
-      ctx.strokeStyle='#fff8c0';
-      ctx.shadowColor='rgba(255,250,180,.9)'; ctx.shadowBlur=8*sx;
-      ctx.lineWidth=2.5*sx;
-      ctx.beginPath(); ctx.ellipse(hx,hy-22*sy,9*sx,3.5*sy,0,0,Math.PI*2); ctx.stroke();
-      break;
-    }
-    case 'cap':{
-      ctx.fillStyle=color;
-      ctx.beginPath(); ctx.arc(hx,hy-12*sy,9*sx,Math.PI,0,false); ctx.fill();
-      // Brim
-      ctx.fillStyle=color;
-      ctx.beginPath();
-      ctx.ellipse(hx+f*8*sx,hy-12*sy,7*sx,2.5*sy,0,0,Math.PI*2);
-      ctx.fill();
-      // Button
-      ctx.fillStyle='rgba(255,255,255,.5)';
-      ctx.beginPath(); ctx.arc(hx,hy-21*sy,1.2*sx,0,Math.PI*2); ctx.fill();
-      break;
-    }
-  }
-  ctx.restore();
-}
+
 
 function _drawArcherBody(a, ax, ay, walk, isMe){
   const f=a.facing;
@@ -1232,10 +1292,20 @@ function _drawArcherBody(a, ax, ay, walk, isMe){
   // Neck
   ctx.fillStyle='#e8b882'; ctx.fillRect(-3*sx,-38*sy,6*sx,7*sy);
   // Head shape
-  ctx.fillStyle='#f5c897';
-  ctx.save(); ctx.shadowColor='rgba(0,0,0,.25)'; ctx.shadowBlur=5*sx;
-  ctx.beginPath(); ctx.ellipse(f*1*sx,-46*sy,10*sx,12.5*sy,f*0.08,0,Math.PI*2); ctx.fill();
-  ctx.restore();
+  let avatarDrawn = false;
+  const aImg = avatarCache[a.id];
+  if(aImg && aImg.complete) {
+    avatarDrawn = drawAvatarHead(aImg, f*1*sx, -46*sy, 11*sx);
+  } else if(isMe && myAvatarImg){
+    avatarDrawn = drawAvatarHead(myAvatarImg, f*1*sx, -46*sy, 11*sx);
+  }
+
+  if(!avatarDrawn){
+    ctx.fillStyle='#f5c897';
+    ctx.save(); ctx.shadowColor='rgba(0,0,0,.25)'; ctx.shadowBlur=5*sx;
+    ctx.beginPath(); ctx.ellipse(f*1*sx,-46*sy,10*sx,12.5*sy,f*0.08,0,Math.PI*2); ctx.fill();
+    ctx.restore();
+  }
   // Hair
   ctx.fillStyle='#3a2010';
   ctx.beginPath(); ctx.ellipse(f*1*sx,-53*sy,9*sx,6*sy,0,Math.PI,0); ctx.fill();
@@ -1245,8 +1315,7 @@ function _drawArcherBody(a, ax, ay, walk, isMe){
   ctx.fillRect(f*1*sx-11*sx,-56*sy,22*sx,7*sy);
   ctx.globalAlpha=1;
 
-  // Cosmetic hat (drawn on top of head/headband)
-  if(a.hat&&a.hat!=='none') drawHat(a.hat,f,a.color);
+  // Cosmetic hat removed — avatars are the only customization
   // Eye
   ctx.fillStyle='#1a1008';
   ctx.beginPath(); ctx.arc(f*5*sx,-47*sy,2.8*sx,0,Math.PI*2); ctx.fill();
@@ -2138,14 +2207,14 @@ socket.on('roomCreated',({code,playerId,lanUrl})=>{
     document.getElementById('lan-box').style.display='block';
     document.getElementById('lan-url').textContent=lanUrl;
   }
-  buildHatPicker('lobby-hpick',(hat)=>{ socket.emit('setHat',{hat}); document.querySelectorAll('#hpick .hsw').forEach(s=>s.classList.toggle('sel',s.dataset.hat===hat)); });
   showScreen('lobby-screen');
+  if(myAvatar) socket.emit('setAvatar',{avatar:myAvatar});
 });
 socket.on('roomJoined',({code,playerId})=>{
   myId=playerId; roomCode=code; isHost=false;
   document.getElementById('disp-code').textContent=code;
-  buildHatPicker('lobby-hpick',(hat)=>{ socket.emit('setHat',{hat}); document.querySelectorAll('#hpick .hsw').forEach(s=>s.classList.toggle('sel',s.dataset.hat===hat)); });
   showScreen('lobby-screen');
+  if(myAvatar) socket.emit('setAvatar',{avatar:myAvatar});
 });
 socket.on('joinError',msg=>{
   document.getElementById('home-err').textContent=msg;
@@ -2154,6 +2223,13 @@ socket.on('joinError',msg=>{
 
 socket.on('lobbyUpdate',({players,allowBots:ab,bracketType})=>{
   lobbyPlayers=players;
+  players.forEach(p=>{
+    if(p.avatar && !avatarCache[p.id]){
+      const img = new Image();
+      img.src = p.avatar;
+      avatarCache[p.id] = img;
+    }
+  });
   if(ab!==undefined){allowBots=ab;updateBotUI(ab);}
   if(!isHost){const bt=document.getElementById('bot-toggle');if(bt)bt.style.opacity='.5';}
   // Bracket type toggle sync
@@ -2168,18 +2244,22 @@ socket.on('lobbyUpdate',({players,allowBots:ab,bracketType})=>{
     }
   }
   document.getElementById('p-count').textContent=players.length;
-  document.getElementById('p-list').innerHTML=players.map(p=>`
+  document.getElementById('p-list').innerHTML=players.map(p=>{
+    const av = p.avatar || (avatarCache[p.id]?.complete && avatarCache[p.id]?.src ? avatarCache[p.id].src : null);
+    const thumb = av
+      ? `<img src="${av}" style="width:32px;height:32px;border-radius:50%;object-fit:cover;border:2px solid ${p.color};flex-shrink:0;"/>`
+      : `<div style="width:32px;height:32px;border-radius:50%;background:${p.color};flex-shrink:0;"></div>`;
+    return `
     <li class="pi">
-      <div class="pdot" style="background:${p.color}"></div>
-      <div class="pname">${HATS[p.hat]&&p.hat!=='none'?HATS[p.hat].emoji+' ':''}${p.name}${p.isHost?' <span style="font-size:.62rem;color:var(--mt)">(host)</span>':''}</div>
+      ${thumb}
+      <div class="pname">${p.name}${p.isHost?' <span style="font-size:.62rem;color:var(--mt)">(host)</span>':''}</div>
       <div class="pst ${p.ready?'rdy':''}">${p.ready?'● Ready':'Waiting'}</div>
-    </li>`).join('');
+    </li>`;
+  }).join('');
   const me=players.find(p=>p.id===myId);
   if(me?.ready){
     document.getElementById('ready-btn').disabled=true;
     document.getElementById('ready-btn').textContent='Waiting...';
-    // Lock in hat/bracket controls once ready
-    document.querySelectorAll('#lobby-hpick .hsw').forEach(s=>s.style.pointerEvents='none');
   }
 });
 
@@ -2527,13 +2607,13 @@ function copyLanUrl(){
 
 function doCreate(){
   const name=document.getElementById('inp-name').value.trim()||'Archer';
-  socket.emit('createRoom',{name,color:myColor,hat:myHat});
+  socket.emit('createRoom',{name,color:myColor,avatar:myAvatar});
 }
 function doJoin(){
   const name=document.getElementById('inp-name').value.trim()||'Archer';
   const code=document.getElementById('inp-code').value.trim().toUpperCase();
   if(!code){document.getElementById('home-err').textContent='Enter a room code';return;}
-  socket.emit('joinRoom',{code,name,color:myColor,hat:myHat});
+  socket.emit('joinRoom',{code,name,color:myColor,avatar:myAvatar});
 }
 function doReady(){
   document.getElementById('ready-btn').disabled=true;
@@ -2544,16 +2624,17 @@ function doForce(){socket.emit('forceStart');}
 
 document.getElementById('inp-code').addEventListener('keydown',e=>{if(e.key==='Enter')doJoin();});
 document.getElementById('inp-name').addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('inp-code').focus();});
+document.getElementById('ai-prompt')?.addEventListener('keydown',e=>{if(e.key==='Enter')generateAIAvatar();});
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // LAN PLAYER DISCOVERY
 // ═══════════════════════════════════════════════════════════════════════════════
 // Non-hosts: announce presence whenever name changes (so host can see them)
 function maybeLanAnnounce(){
-  if(myId||roomCode) return; // already in a room
+  if(myId||roomCode) return;
   const name=document.getElementById('inp-name').value.trim();
   if(!name) return;
-  socket.emit('lanAnnounce',{name,color:myColor,hat:myHat});
+  socket.emit('lanAnnounce',{name,color:myColor});
 }
 document.getElementById('inp-name').addEventListener('input', maybeLanAnnounce);
 

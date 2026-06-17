@@ -4,10 +4,62 @@ const { Server } = require('socket.io');
 const path = require('path');
 const os = require('os');
 
+
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
+app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
+
+// ─── GEMINI AVATAR GENERATION ────────────────────────────────────────────────
+app.post('/generate-avatar', async (req, res) => {
+  const { prompt } = req.body || {};
+  if (!prompt || !prompt.trim()) {
+    return res.status(400).json({ error: 'Prompt is required.' });
+  }
+
+  const fullPrompt = `${prompt.trim()}, head only portrait, front facing, cartoon game avatar, transparent background, centered face, square portrait, no body`;
+  const encodedPrompt = encodeURIComponent(fullPrompt);
+  const generateUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}`;
+
+  try {
+    console.log(`\n[AI Avatar] Generating image with Pollinations...`);
+    console.log(`[AI Avatar] Prompt: ${fullPrompt}`);
+    
+    const startTime = Date.now();
+    
+    // Set 20 second timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
+    
+    const response = await fetch(generateUrl, { signal: controller.signal });
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      throw new Error(`Pollinations API returned status: ${response.status}`);
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    const base64String = buffer.toString('base64');
+    
+    const durationMs = Date.now() - startTime;
+    console.log(`[AI Avatar] Generation duration: ${durationMs}ms`);
+    console.log(`[AI Avatar] Image extraction success. Payload size: ${base64String.length} chars.`);
+
+    return res.json({
+      mimeType: 'image/jpeg',
+      data: base64String,
+    });
+  } catch (err) {
+    console.error('[AI Avatar] Image extraction failure/error:', err?.message || err);
+    if (err.name === 'AbortError') {
+      return res.status(504).json({ error: 'Generation timed out. Pollinations is currently unavailable or too slow.' });
+    }
+    return res.status(500).json({ error: 'Failed to generate avatar. Pollinations may be unavailable.' });
+  }
+});
+
 
 // ─── LAN IP DETECTION ────────────────────────────────────────────────────────
 function getLocalIP(){
@@ -60,7 +112,7 @@ const ARROW_CONFIG = {
 const COLORS=['#FF3B3B','#3BFF6E','#3BB5FF','#FFD93B','#FF8C3B','#C03BFF','#FF69B4','#00FFFF'];
 let rooms={};
 // LAN visitors: players who haven't joined a room yet but announced themselves
-let lanWaiters={}; // socketId → {socketId, name, color, hat}
+let lanWaiters={}; // socketId -> {socketId, name, color}
 function rand(a,b){return a+Math.random()*(b-a);}
 function dist(ax,ay,bx,by){return Math.sqrt((ax-bx)**2+(ay-by)**2);}
 function uid(){return Math.random().toString(36).slice(2,8);}
@@ -135,9 +187,9 @@ function tickRagdoll(r){
 }
 
 // ─── ARCHER ───────────────────────────────────────────────────────────────────
-function createArcher(id,name,color,side,hat){
+function createArcher(id,name,color,side){
   return {
-    id,name,color,side,hat:hat||'none',
+    id,name,color,side,
     x:side===0?80:W-80, y:GROUND_Y,
     vy:0, onGround:true,
     hp:MAX_HP, stamina:MAX_STAMINA,
@@ -424,8 +476,8 @@ function createDuel(p1,p2,roomCode,matchId){
   return {
     roomCode, matchId,
     archers:{
-      [p1.id]:createArcher(p1.id,p1.name,p1.color,0,p1.hat),
-      [p2.id]:createArcher(p2.id,p2.name,p2.color,1,p2.hat),
+      [p1.id]:createArcher(p1.id,p1.name,p1.color,0),
+      [p2.id]:createArcher(p2.id,p2.name,p2.color,1),
     },
     arrows:[], apples:[spawnApple(),spawnApple()],
     hurdles:makeHurdles(), rocks:[],
@@ -629,7 +681,7 @@ function tickDuel(duel,room){
     matchId:duel.matchId,
     wind:duel.wind,
     archers:archerList.map(a=>({
-      id:a.id,name:a.name,color:a.color,side:a.side,hat:a.hat||'none',
+      id:a.id,name:a.name,color:a.color,side:a.side,
       x:a.x,y:a.y,alive:a.alive,dead:a.dead,
       hp:Math.round(a.hp),maxHp:MAX_HP,
       stamina:Math.round(a.stamina),
@@ -733,7 +785,7 @@ function buildBracket(players,allowBots){
   if(allowBots){
     let botNum=1;
     while(arr.length<slots){
-      arr.push({id:'bot_'+uid(),name:`Bot ${botNum++}`,color:COLORS[arr.length%COLORS.length],isBot:true,hat:'none'});
+      arr.push({id:'bot_'+uid(),name:`Bot ${botNum++}`,color:COLORS[arr.length%COLORS.length],isBot:true});
     }
   }
   const seeded=[...arr];
@@ -1083,7 +1135,7 @@ function serializeBracket(b){
 
 // ─── ROOM / PLAYER ───────────────────────────────────────────────────────────
 function createRoom(code){return{code,players:{},botPlayers:{},state:'lobby',bracket:null,activeDuel:null,allowBots:false,bracketType:'single'};}
-function createPlayer(id,name,color,hat){return{id,name,color,hat:hat||'none',ready:false,isHost:false,isBot:false};}
+function createPlayer(id,name,color,avatar){return{id,name,color,avatar:avatar||null,ready:false,isHost:false,isBot:false};}
 
 function startTournament(room){
   room.state='tournament';
@@ -1101,7 +1153,7 @@ function startTournament(room){
 function lobbyData(room){
   return {
     code:room.code,allowBots:room.allowBots,bracketType:room.bracketType||'single',
-    players:Object.values(room.players).map(p=>({id:p.id,name:p.name,color:p.color,hat:p.hat||'none',ready:p.ready,isHost:p.isHost})),
+    players:Object.values(room.players).map(p=>({id:p.id,name:p.name,color:p.color,avatar:p.avatar||null,ready:p.ready,isHost:p.isHost})),
   };
 }
 
@@ -1121,10 +1173,10 @@ function broadcastLanWaiters(){
 
 // ─── SOCKETS ─────────────────────────────────────────────────────────────────
 io.on('connection',socket=>{
-  socket.on('createRoom',({name,color,hat})=>{
+  socket.on('createRoom',({name,color,avatar})=>{
     const code=Math.random().toString(36).substring(2,7).toUpperCase();
     rooms[code]=createRoom(code);
-    const p=createPlayer(socket.id,name||'Archer',color||COLORS[0],hat);
+    const p=createPlayer(socket.id,name||'Archer',color||COLORS[0],avatar);
     p.isHost=true;
     rooms[code].players[socket.id]=p;
     socket.join(code);
@@ -1133,14 +1185,14 @@ io.on('connection',socket=>{
     io.to(code).emit('lobbyUpdate',lobbyData(rooms[code]));
   });
 
-  socket.on('joinRoom',({code,name,color,hat})=>{
+  socket.on('joinRoom',({code,name,color,avatar})=>{
     code=(code||'').toUpperCase();
     const room=rooms[code];
     if(!room) return socket.emit('joinError','Room not found');
     if(room.state!=='lobby') return socket.emit('joinError','Tournament already started');
     if(Object.keys(room.players).length>=8) return socket.emit('joinError','Room full (8 max)');
     const idx=Object.keys(room.players).length;
-    const p=createPlayer(socket.id,name||`Archer ${idx+1}`,color||COLORS[idx%COLORS.length],hat);
+    const p=createPlayer(socket.id,name||`Archer ${idx+1}`,color||COLORS[idx%COLORS.length],avatar);
     room.players[socket.id]=p;
     socket.join(code);
     delete lanWaiters[socket.id];
@@ -1149,13 +1201,12 @@ io.on('connection',socket=>{
     broadcastLanWaiters();
   });
 
-  socket.on('setHat',({hat})=>{
+  socket.on('setAvatar',({avatar})=>{
     const room=getRoomByPlayer(socket.id);
     if(!room||room.state!=='lobby') return;
     const p=room.players[socket.id];
     if(!p||p.ready) return;
-    const validHats=['none','crown','viking','tophat','bandana','halo','cap'];
-    p.hat=validHats.includes(hat)?hat:'none';
+    p.avatar=avatar;
     io.to(room.code).emit('lobbyUpdate',lobbyData(room));
   });
 
@@ -1253,9 +1304,9 @@ io.on('connection',socket=>{
 
   // ── LAN DISCOVERY ──────────────────────────────────────────────────────────
   // A visitor on the home screen announces themselves so hosts can see them
-  socket.on('lanAnnounce',({name,color,hat})=>{
-    if(getRoomByPlayer(socket.id)) return; // already in a room
-    lanWaiters[socket.id]={socketId:socket.id,name:name||'Archer',color:color||COLORS[0],hat:hat||'none'};
+  socket.on('lanAnnounce',({name,color})=>{
+    if(getRoomByPlayer(socket.id)) return;
+    lanWaiters[socket.id]={socketId:socket.id,name:name||'Archer',color:color||COLORS[0]};
     // Notify all host sockets about updated LAN waiters
     broadcastLanWaiters();
   });
@@ -1271,7 +1322,7 @@ io.on('connection',socket=>{
     if(!targetSocket) { delete lanWaiters[targetId]; broadcastLanWaiters(); return; }
     // Auto-join them
     const idx=Object.keys(room.players).length;
-    const p=createPlayer(targetId,waiter.name,waiter.color||COLORS[idx%COLORS.length],waiter.hat);
+    const p=createPlayer(targetId,waiter.name,waiter.color||COLORS[idx%COLORS.length],null);
     room.players[targetId]=p;
     targetSocket.join(room.code);
     delete lanWaiters[targetId];
